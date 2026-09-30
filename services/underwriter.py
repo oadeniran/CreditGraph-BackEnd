@@ -17,7 +17,7 @@ import logging
 import secrets
 import time
 from typing import Optional
-
+import asyncio
 from eth_account.messages import encode_typed_data
 from web3 import Web3
 
