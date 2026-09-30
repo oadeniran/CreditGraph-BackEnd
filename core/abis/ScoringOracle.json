@@ -1,0 +1,12 @@
+[
+  {"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"uint16","name":"score","type":"uint16"},{"internalType":"uint8","name":"tier","type":"uint8"},{"internalType":"bytes32","name":"reasonHash","type":"bytes32"},{"internalType":"bytes[]","name":"signatures","type":"bytes[]"},{"internalType":"bytes32","name":"nonce","type":"bytes32"}],"name":"submitScore","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"finalizeScore","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"challengeScore","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"pending","outputs":[{"internalType":"uint16","name":"score","type":"uint16"},{"internalType":"uint8","name":"tier","type":"uint8"},{"internalType":"bytes32","name":"reasonHash","type":"bytes32"},{"internalType":"uint64","name":"submittedAt","type":"uint64"},{"internalType":"bool","name":"finalized","type":"bool"},{"internalType":"bool","name":"challenged","type":"bool"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"quorumThreshold","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"challengePeriod","outputs":[{"internalType":"uint64","name":"","type":"uint64"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"uint64","name":"period","type":"uint64"}],"name":"setChallengePeriod","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[],"name":"domainSeparator","outputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},
+  {"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"},{"indexed":false,"internalType":"uint16","name":"score","type":"uint16"},{"indexed":false,"internalType":"uint8","name":"tier","type":"uint8"},{"indexed":false,"internalType":"uint64","name":"finalizeAfter","type":"uint64"}],"name":"ScoreSubmitted","type":"event"},
+  {"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"},{"indexed":false,"internalType":"uint16","name":"score","type":"uint16"},{"indexed":false,"internalType":"uint8","name":"tier","type":"uint8"}],"name":"ScoreFinalized","type":"event"}
+]

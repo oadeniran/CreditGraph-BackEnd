@@ -1,0 +1,9 @@
+[
+  {"inputs":[{"internalType":"uint8","name":"role","type":"uint8"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"register","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"address","name":"agent","type":"address"},{"internalType":"uint8","name":"role","type":"uint8"}],"name":"isAuthorized","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"agent","type":"address"}],"name":"stakeOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"agent","type":"address"}],"name":"reputationOf","outputs":[{"internalType":"int256","name":"","type":"int256"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"agents","outputs":[{"internalType":"uint8","name":"role","type":"uint8"},{"internalType":"uint256","name":"stake","type":"uint256"},{"internalType":"int256","name":"reputation","type":"int256"},{"internalType":"uint64","name":"registeredAt","type":"uint64"},{"internalType":"uint64","name":"unbondingAt","type":"uint64"},{"internalType":"bool","name":"active","type":"bool"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"uint8","name":"role","type":"uint8"}],"name":"minStake","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"uint8","name":"role","type":"uint8"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"setMinStake","outputs":[],"stateMutability":"nonpayable","type":"function"}
+]

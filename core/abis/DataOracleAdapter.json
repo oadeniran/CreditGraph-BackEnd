@@ -1,0 +1,5 @@
+[
+  {"inputs":[{"internalType":"bytes32","name":"pairId","type":"bytes32"}],"name":"latestPrice","outputs":[{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"uint64","name":"updatedAt","type":"uint64"},{"internalType":"uint8","name":"decimals","type":"uint8"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"bytes32","name":"pairId","type":"bytes32"}],"name":"peek","outputs":[{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"uint64","name":"updatedAt","type":"uint64"},{"internalType":"uint8","name":"decimals","type":"uint8"},{"internalType":"bool","name":"exists","type":"bool"}],"stateMutability":"view","type":"function"},
+  {"inputs":[{"internalType":"bytes32","name":"pairId","type":"bytes32"},{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"uint8","name":"decimals","type":"uint8"}],"name":"setPrice","outputs":[],"stateMutability":"nonpayable","type":"function"}
+]

@@ -1,0 +1,9 @@
+[
+  {"inputs":[],"name":"route","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[],"name":"insuranceBps","outputs":[{"internalType":"uint16","name":"","type":"uint16"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"operationsBps","outputs":[{"internalType":"uint16","name":"","type":"uint16"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"agentRewardsBps","outputs":[{"internalType":"uint16","name":"","type":"uint16"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"insuranceFund","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"operations","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
+  {"inputs":[],"name":"agentRewards","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"}
+]
