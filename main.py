@@ -1,12 +1,10 @@
 """
-CreditGraph FastAPI entrypoint.
+CreditGraph BE entrypoint.
 
-On startup:
+Startup:
   1. Ensure DB indexes
-  2. Run on-chain bootstrap (register agents, set min stake, zero challenge period if possible)
-  3. Start background event indexer
-
-Mount all routers under /api.
+  2. Bootstrap all configured chains
+  3. Spawn per-chain event indexers
 """
 
 import asyncio
@@ -17,12 +15,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.database import ensure_indexes
-from core.bootstrap import run_bootstrap
+from core.bootstrap import bootstrap_all_configured_chains
 from services.indexer import run_indexer
 
 from api.routes import (
     identity, scoring, dashboard, loans, attest, pool,
-    x402, agents, admin, market,
+    x402, agents, admin, market, chains,
 )
 
 logging.basicConfig(
@@ -38,8 +36,9 @@ _indexer_task = None
 async def lifespan(app: FastAPI):
     log.info("--- CreditGraph BE starting ---")
     await ensure_indexes()
-    bootstrap_status = run_bootstrap()
-    app.state.bootstrap = bootstrap_status
+
+    bootstrap_results = bootstrap_all_configured_chains()
+    app.state.bootstrap = bootstrap_results
 
     global _indexer_task
     _indexer_task = asyncio.create_task(run_indexer())
@@ -57,7 +56,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="CreditGraph API",
-    version="0.2",
+    version="0.3",
     docs_url="/api/docs",
     lifespan=lifespan,
 )
@@ -70,7 +69,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount routers
+app.include_router(chains.router, prefix="/api", tags=["Chains"])
 app.include_router(identity.router, prefix="/api", tags=["Identity"])
 app.include_router(scoring.router, prefix="/api", tags=["Scoring"])
 app.include_router(dashboard.router, prefix="/api", tags=["Dashboard"])
@@ -85,36 +84,48 @@ app.include_router(market.router, prefix="/api", tags=["Market"])
 
 @app.get("/")
 async def root():
-    return {"message": "CreditGraph API. LFG."}
+    return {"message": "CreditGraph API — multi-chain"}
 
 
 @app.get("/api/health")
 async def health():
-    """Diagnostics. Useful when something looks off."""
-    from core.contracts import admin_signer, agent_signers, w3, is_connected
+    from core.contracts import admin_signer, agent_signers, get_w3
+    from core.chains import list_chains
     from services import chain_reader
 
-    try:
-        admin_eth = w3.eth.get_balance(admin_signer.address) / 1e18
-    except Exception:
-        admin_eth = None
+    per_chain = []
+    for chain_meta in list_chains():
+        key = chain_meta["key"]
+        try:
+            w3 = get_w3(key)
+            connected = w3.is_connected() and w3.eth.chain_id == chain_meta["chain_id"]
+            admin_native = w3.eth.get_balance(admin_signer.address) / 1e18
+        except Exception:
+            connected = False
+            admin_native = None
 
-    agent_status = []
-    for a in agent_signers:
-        rec = chain_reader.agent_record(a.address)
-        agent_status.append({
-            "address": a.address,
-            "active": rec.get("active", False) if rec else False,
-            "stake_usdc": rec.get("stake_usdc", 0) if rec else 0,
+        agent_status = []
+        for a in agent_signers:
+            rec = chain_reader.agent_record(key, a.address)
+            agent_status.append({
+                "address": a.address,
+                "active": rec.get("active", False) if rec else False,
+                "stake_usdc": rec.get("stake_usdc", 0) if rec else 0,
+            })
+
+        per_chain.append({
+            "chain_key": key,
+            "name": chain_meta["name"],
+            "chain_id": chain_meta["chain_id"],
+            "connected": connected,
+            "admin_native": admin_native,
+            "agents": agent_status,
+            "challenge_period": chain_reader.oracle_challenge_period(key),
         })
 
     return {
-        "connected": is_connected(),
-        "chain_id": w3.eth.chain_id if is_connected() else None,
         "admin_address": admin_signer.address,
-        "admin_eth": admin_eth,
-        "agents": agent_status,
-        "challenge_period": chain_reader.oracle_challenge_period(),
+        "chains": per_chain,
         "bootstrap": getattr(app.state, "bootstrap", None),
     }
 

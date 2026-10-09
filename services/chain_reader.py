@@ -1,48 +1,18 @@
 """
-Read-only chain queries. Anything the FE needs to display goes through here.
-Mongo is consulted afterward for things the chain can't easily give us
-(human history, pagination, friendly metadata).
+Read-only chain queries. Chain-aware: every function takes `chain_key`.
+Includes async wrappers so routes can parallelize with asyncio.gather.
 """
 
+import asyncio
 import logging
 from typing import Optional
 from web3 import Web3
-from core.contracts import contracts, get
-import asyncio
+
+from core.contracts import get_contracts, get_contract, get_w3
 
 log = logging.getLogger("creditgraph.chain_reader")
 
 USDC_DECIMALS = 6
-
-
-
-# Async wrappers — sync versions stay for non-async callers.
-# Pattern: `await async_get_score(token_id)` instead of `get_score(token_id)`.
-async def a_token_id_of(wallet):           return await asyncio.to_thread(token_id_of, wallet)
-async def a_get_score(token_id):           return await asyncio.to_thread(get_score, token_id)
-async def a_get_pending_score(token_id):   return await asyncio.to_thread(get_pending_score, token_id)
-async def a_oracle_challenge_period():     return await asyncio.to_thread(oracle_challenge_period)
-async def a_graduation_state(token_id):    return await asyncio.to_thread(graduation_state, token_id)
-async def a_available_credit(token_id):    return await asyncio.to_thread(available_credit, token_id)
-async def a_tier_base_limits():            return await asyncio.to_thread(tier_base_limits)
-async def a_borrow_apr(tier, util_bps):    return await asyncio.to_thread(borrow_apr, tier, util_bps)
-async def a_supply_apr(util_bps, rf=0):    return await asyncio.to_thread(supply_apr, util_bps, rf)
-async def a_rate_curves():                 return await asyncio.to_thread(rate_curves)
-async def a_pool_stats():                  return await asyncio.to_thread(pool_stats)
-async def a_cgusdc_balance(wallet):        return await asyncio.to_thread(cgusdc_balance, wallet)
-async def a_get_loan(loan_id):             return await asyncio.to_thread(get_loan, loan_id)
-async def a_borrower_loan_ids(token_id):   return await asyncio.to_thread(borrower_loan_ids, token_id)
-async def a_total_active_exposure(t_id):   return await asyncio.to_thread(total_active_exposure, t_id)
-async def a_grace_period():                return await asyncio.to_thread(grace_period)
-async def a_attestations_for(token_id):    return await asyncio.to_thread(attestations_for, token_id)
-async def a_attestations_by(t_id):         return await asyncio.to_thread(attestations_by, t_id)
-async def a_get_attestation(att_id):       return await asyncio.to_thread(get_attestation, att_id)
-async def a_total_attestation_weight(tid): return await asyncio.to_thread(total_attestation_weight, tid)
-async def a_insurance_state():             return await asyncio.to_thread(insurance_state)
-async def a_treasury_state():              return await asyncio.to_thread(treasury_state)
-async def a_agent_record(address):        return await asyncio.to_thread(agent_record, address)
-async def a_usdc_balance(wallet):          return await asyncio.to_thread(usdc_balance, wallet)
-async def a_identity_exists(token_id):     return await asyncio.to_thread(identity_exists, token_id)
 
 
 def _u(units: int) -> float:
@@ -53,29 +23,30 @@ def _u(units: int) -> float:
 # Identity & score
 # ----------------------------------------------------------------
 
-def token_id_of(wallet: str) -> int:
+def token_id_of(chain_key: str, wallet: str) -> int:
     try:
-        return get("CreditIdentity").functions.tokenIdOf(Web3.to_checksum_address(wallet)).call()
+        return get_contract(chain_key, "CreditIdentity").functions.tokenIdOf(
+            Web3.to_checksum_address(wallet)
+        ).call()
     except Exception as e:
-        log.warning(f"tokenIdOf({wallet}) failed: {e}")
+        log.warning(f"[{chain_key}] tokenIdOf({wallet}) failed: {e}")
         return 0
 
 
-def identity_exists(token_id: int) -> bool:
+def identity_exists(chain_key: str, token_id: int) -> bool:
     if token_id == 0:
         return False
     try:
-        return get("CreditIdentity").functions.exists(token_id).call()
+        return get_contract(chain_key, "CreditIdentity").functions.exists(token_id).call()
     except Exception:
         return False
 
 
-def get_score(token_id: int) -> dict:
-    """Returns { score, tier, is_stale, has_score }."""
+def get_score(chain_key: str, token_id: int) -> dict:
     if token_id == 0:
         return {"score": 0, "tier": 1, "is_stale": True, "has_score": False}
     try:
-        sr = get("ScoreRegistry")
+        sr = get_contract(chain_key, "ScoreRegistry")
         has = sr.functions.hasScore(token_id).call()
         if not has:
             return {"score": 0, "tier": 1, "is_stale": True, "has_score": False}
@@ -87,14 +58,13 @@ def get_score(token_id: int) -> dict:
             "has_score": True,
         }
     except Exception as e:
-        log.warning(f"getScore({token_id}) failed: {e}")
+        log.warning(f"[{chain_key}] getScore({token_id}) failed: {e}")
         return {"score": 0, "tier": 1, "is_stale": True, "has_score": False}
 
 
-def get_pending_score(token_id: int) -> Optional[dict]:
-    """Returns the pending submission or None if no submission has ever been made."""
+def get_pending_score(chain_key: str, token_id: int) -> Optional[dict]:
     try:
-        oracle = get("ScoringOracle")
+        oracle = get_contract(chain_key, "ScoringOracle")
         score, tier, reason_hash, submitted_at, finalized, challenged = \
             oracle.functions.pending(token_id).call()
         if submitted_at == 0:
@@ -110,13 +80,13 @@ def get_pending_score(token_id: int) -> Optional[dict]:
             "challenged": bool(challenged),
         }
     except Exception as e:
-        log.warning(f"pending({token_id}) failed: {e}")
+        log.warning(f"[{chain_key}] pending({token_id}) failed: {e}")
         return None
 
 
-def oracle_challenge_period() -> int:
+def oracle_challenge_period(chain_key: str) -> int:
     try:
-        return int(get("ScoringOracle").functions.challengePeriod().call())
+        return int(get_contract(chain_key, "ScoringOracle").functions.challengePeriod().call())
     except Exception:
         return 0
 
@@ -125,18 +95,15 @@ def oracle_challenge_period() -> int:
 # Graduation
 # ----------------------------------------------------------------
 
-def graduation_state(token_id: int) -> dict:
+def graduation_state(chain_key: str, token_id: int) -> dict:
     try:
-        grad = get("RepaymentGraduation")
+        grad = get_contract(chain_key, "RepaymentGraduation")
         tier = grad.functions.currentTier(token_id).call()
         streak = grad.functions.consecutiveOnTime(token_id).call()
         lifetime_on_time = grad.functions.lifetimeOnTime(token_id).call()
         lifetime_defaults = grad.functions.lifetimeDefaults(token_id).call()
         thresholds = [grad.functions.promotionThresholds(i).call() for i in range(5)]
-        # Next-tier threshold
-        next_threshold = None
-        if tier < 5:
-            next_threshold = int(thresholds[tier])  # tier index t means need thresholds[t] streak to reach t+1
+        next_threshold = int(thresholds[tier]) if tier < 5 else None
         return {
             "tier": int(tier),
             "streak": int(streak),
@@ -147,7 +114,7 @@ def graduation_state(token_id: int) -> dict:
             "to_next_tier": max(0, next_threshold - streak) if next_threshold is not None else None,
         }
     except Exception as e:
-        log.warning(f"graduation_state({token_id}) failed: {e}")
+        log.warning(f"[{chain_key}] graduation_state({token_id}) failed: {e}")
         return {
             "tier": 1, "streak": 0, "lifetime_on_time": 0, "lifetime_defaults": 0,
             "thresholds": [0, 2, 5, 12, 24], "next_tier_threshold": 2, "to_next_tier": 2,
@@ -158,10 +125,9 @@ def graduation_state(token_id: int) -> dict:
 # Credit limit
 # ----------------------------------------------------------------
 
-def available_credit(token_id: int) -> dict:
-    """Returns USDC-denominated values (floats)."""
+def available_credit(chain_key: str, token_id: int) -> dict:
     try:
-        eng = get("CreditLimitEngine")
+        eng = get_contract(chain_key, "CreditLimitEngine")
         limit, exposure, headroom = eng.functions.availableCredit(token_id).call()
         return {
             "limit_usdc": _u(limit),
@@ -172,16 +138,14 @@ def available_credit(token_id: int) -> dict:
             "headroom_units": int(headroom),
         }
     except Exception as e:
-        log.warning(f"availableCredit({token_id}) failed: {e}")
-        return {
-            "limit_usdc": 0.0, "exposure_usdc": 0.0, "headroom_usdc": 0.0,
-            "limit_units": 0, "exposure_units": 0, "headroom_units": 0,
-        }
+        log.warning(f"[{chain_key}] availableCredit({token_id}) failed: {e}")
+        return {"limit_usdc": 0.0, "exposure_usdc": 0.0, "headroom_usdc": 0.0,
+                "limit_units": 0, "exposure_units": 0, "headroom_units": 0}
 
 
-def tier_base_limits() -> list[float]:
+def tier_base_limits(chain_key: str) -> list[float]:
     try:
-        eng = get("CreditLimitEngine")
+        eng = get_contract(chain_key, "CreditLimitEngine")
         return [_u(eng.functions.tierBaseLimit(i).call()) for i in range(5)]
     except Exception:
         return [20.0, 50.0, 150.0, 500.0, 2000.0]
@@ -191,25 +155,25 @@ def tier_base_limits() -> list[float]:
 # Interest rate model
 # ----------------------------------------------------------------
 
-def borrow_apr(tier: int, utilization_bps: int) -> int:
+def borrow_apr(chain_key: str, tier: int, utilization_bps: int) -> int:
     try:
-        return int(get("InterestRateModel").functions.borrowAPR(tier, utilization_bps).call())
+        return int(get_contract(chain_key, "InterestRateModel").functions.borrowAPR(tier, utilization_bps).call())
     except Exception as e:
-        log.warning(f"borrowAPR failed: {e}")
+        log.warning(f"[{chain_key}] borrowAPR failed: {e}")
         return 0
 
 
-def supply_apr(utilization_bps: int, reserve_factor_bps: int = 0) -> int:
+def supply_apr(chain_key: str, utilization_bps: int, reserve_factor_bps: int = 0) -> int:
     try:
-        return int(get("InterestRateModel").functions.supplyAPR(utilization_bps, reserve_factor_bps).call())
+        return int(get_contract(chain_key, "InterestRateModel").functions.supplyAPR(utilization_bps, reserve_factor_bps).call())
     except Exception as e:
-        log.warning(f"supplyAPR failed: {e}")
+        log.warning(f"[{chain_key}] supplyAPR failed: {e}")
         return 0
 
 
-def rate_curves() -> dict:
+def rate_curves(chain_key: str) -> dict:
     try:
-        irm = get("InterestRateModel")
+        irm = get_contract(chain_key, "InterestRateModel")
         kink = int(irm.functions.kinkBps().call())
         curves = []
         for i in range(5):
@@ -217,7 +181,7 @@ def rate_curves() -> dict:
             curves.append({"tier": i + 1, "base_bps": int(base), "slope1_bps": int(s1), "slope2_bps": int(s2)})
         return {"kink_bps": kink, "curves": curves}
     except Exception as e:
-        log.warning(f"rate_curves failed: {e}")
+        log.warning(f"[{chain_key}] rate_curves failed: {e}")
         return {"kink_bps": 8000, "curves": []}
 
 
@@ -225,9 +189,9 @@ def rate_curves() -> dict:
 # Pool
 # ----------------------------------------------------------------
 
-def pool_stats() -> dict:
+def pool_stats(chain_key: str) -> dict:
     try:
-        pool = get("LendingPool")
+        pool = get_contract(chain_key, "LendingPool")
         total_assets = pool.functions.totalAssets().call()
         total_borrowed = pool.functions.totalBorrowed().call()
         available = pool.functions.availableLiquidity().call()
@@ -235,8 +199,8 @@ def pool_stats() -> dict:
         cum_interest = pool.functions.cumulativeInterest().call()
         cum_losses = pool.functions.cumulativeLosses().call()
         supply_cap = pool.functions.supplyCap().call()
-        b_apr = borrow_apr(3, util_bps)  # tier-3 midpoint as a reference
-        s_apr = supply_apr(util_bps, 0)
+        b_apr = borrow_apr(chain_key, 3, util_bps)
+        s_apr = supply_apr(chain_key, util_bps, 0)
         return {
             "total_assets_usdc": _u(total_assets),
             "total_borrowed_usdc": _u(total_borrowed),
@@ -250,22 +214,18 @@ def pool_stats() -> dict:
             "supply_apr_bps": int(s_apr),
         }
     except Exception as e:
-        log.warning(f"pool_stats failed: {e}")
+        log.warning(f"[{chain_key}] pool_stats failed: {e}")
         return {}
 
 
-def cgusdc_balance(wallet: str) -> dict:
-    """Wallet's cgUSDC shares + their USDC equivalent."""
+def cgusdc_balance(chain_key: str, wallet: str) -> dict:
     try:
-        pool = get("LendingPool")
+        pool = get_contract(chain_key, "LendingPool")
         shares = pool.functions.balanceOf(Web3.to_checksum_address(wallet)).call()
         assets = pool.functions.convertToAssets(shares, Web3.to_checksum_address(wallet)).call() if shares > 0 else 0
-        return {
-            "shares": int(shares),
-            "assets_usdc": _u(assets),
-        }
+        return {"shares": int(shares), "assets_usdc": _u(assets)}
     except Exception as e:
-        log.warning(f"cgusdc_balance failed: {e}")
+        log.warning(f"[{chain_key}] cgusdc_balance failed: {e}")
         return {"shares": 0, "assets_usdc": 0.0}
 
 
@@ -276,19 +236,20 @@ def cgusdc_balance(wallet: str) -> dict:
 LOAN_STATE_NAMES = ["None", "Active", "Repaid", "Late", "Defaulted"]
 
 
-def get_loan(loan_id: int) -> Optional[dict]:
+def get_loan(chain_key: str, loan_id: int) -> Optional[dict]:
     try:
-        loan = get("LoanManager").functions.getLoan(loan_id).call()
+        lm = get_contract(chain_key, "LoanManager")
+        loan = lm.functions.getLoan(loan_id).call()
         token_id, principal, outstanding, interest_paid, originated_at, due_at, last_accrual, apr_bps, state = loan
         if state == 0:
             return None
-        live_outstanding = get("LoanManager").functions.computeOutstanding(loan_id).call()
+        live_outstanding = lm.functions.computeOutstanding(loan_id).call()
         return {
             "loan_id": int(loan_id),
             "token_id": int(token_id),
             "principal_usdc": _u(principal),
             "outstanding_principal_usdc": _u(outstanding),
-            "outstanding_total_usdc": _u(live_outstanding),  # principal + accrued interest
+            "outstanding_total_usdc": _u(live_outstanding),
             "interest_paid_usdc": _u(interest_paid),
             "originated_at": int(originated_at),
             "due_at": int(due_at),
@@ -298,28 +259,28 @@ def get_loan(loan_id: int) -> Optional[dict]:
             "state_code": int(state),
         }
     except Exception as e:
-        log.warning(f"get_loan({loan_id}) failed: {e}")
+        log.warning(f"[{chain_key}] get_loan({loan_id}) failed: {e}")
         return None
 
 
-def borrower_loan_ids(token_id: int) -> list[int]:
+def borrower_loan_ids(chain_key: str, token_id: int) -> list[int]:
     try:
-        return [int(x) for x in get("LoanManager").functions.getBorrowerLoans(token_id).call()]
+        return [int(x) for x in get_contract(chain_key, "LoanManager").functions.getBorrowerLoans(token_id).call()]
     except Exception as e:
-        log.warning(f"getBorrowerLoans({token_id}) failed: {e}")
+        log.warning(f"[{chain_key}] getBorrowerLoans({token_id}) failed: {e}")
         return []
 
 
-def total_active_exposure(token_id: int) -> float:
+def total_active_exposure(chain_key: str, token_id: int) -> float:
     try:
-        return _u(get("LoanManager").functions.totalActiveExposure(token_id).call())
+        return _u(get_contract(chain_key, "LoanManager").functions.totalActiveExposure(token_id).call())
     except Exception:
         return 0.0
 
 
-def grace_period() -> int:
+def grace_period(chain_key: str) -> int:
     try:
-        return int(get("LoanManager").functions.gracePeriod().call())
+        return int(get_contract(chain_key, "LoanManager").functions.gracePeriod().call())
     except Exception:
         return 7 * 86400
 
@@ -328,9 +289,9 @@ def grace_period() -> int:
 # Attestations
 # ----------------------------------------------------------------
 
-def attestations_for(token_id: int) -> list[dict]:
+def attestations_for(chain_key: str, token_id: int) -> list[dict]:
     try:
-        rows = get("SocialAttestation").functions.attestationsFor(token_id).call()
+        rows = get_contract(chain_key, "SocialAttestation").functions.attestationsFor(token_id).call()
         out = []
         for r in rows:
             attester_token_id, subject_token_id, bond, created_at, expires_at, active, rel_type = r
@@ -345,24 +306,25 @@ def attestations_for(token_id: int) -> list[dict]:
             })
         return out
     except Exception as e:
-        log.warning(f"attestationsFor({token_id}) failed: {e}")
+        log.warning(f"[{chain_key}] attestationsFor({token_id}) failed: {e}")
         return []
 
 
-def attestations_by(attester_token_id: int) -> list[int]:
+def attestations_by(chain_key: str, attester_token_id: int) -> list[int]:
     try:
-        return [int(x) for x in get("SocialAttestation").functions.attestationsByAttester(attester_token_id).call()]
+        return [int(x) for x in get_contract(chain_key, "SocialAttestation").functions.attestationsByAttester(attester_token_id).call()]
     except Exception:
         return []
 
 
-def get_attestation(attestation_id: int) -> Optional[dict]:
+def get_attestation(chain_key: str, attestation_id: int) -> Optional[dict]:
     try:
-        r = get("SocialAttestation").functions.getAttestation(attestation_id).call()
+        sa = get_contract(chain_key, "SocialAttestation")
+        r = sa.functions.getAttestation(attestation_id).call()
         attester_token_id, subject_token_id, bond, created_at, expires_at, active, rel_type = r
         if created_at == 0:
             return None
-        unlock_at = int(get("SocialAttestation").functions.revokeUnlockAt(attestation_id).call())
+        unlock_at = int(sa.functions.revokeUnlockAt(attestation_id).call())
         return {
             "attestation_id": int(attestation_id),
             "attester_token_id": int(attester_token_id),
@@ -375,13 +337,13 @@ def get_attestation(attestation_id: int) -> Optional[dict]:
             "revoke_unlock_at": unlock_at,
         }
     except Exception as e:
-        log.warning(f"getAttestation({attestation_id}) failed: {e}")
+        log.warning(f"[{chain_key}] getAttestation({attestation_id}) failed: {e}")
         return None
 
 
-def total_attestation_weight(token_id: int) -> float:
+def total_attestation_weight(chain_key: str, token_id: int) -> float:
     try:
-        return _u(get("SocialAttestation").functions.totalWeight(token_id).call())
+        return _u(get_contract(chain_key, "SocialAttestation").functions.totalWeight(token_id).call())
     except Exception:
         return 0.0
 
@@ -390,22 +352,22 @@ def total_attestation_weight(token_id: int) -> float:
 # Insurance, treasury, agents
 # ----------------------------------------------------------------
 
-def insurance_state() -> dict:
+def insurance_state(chain_key: str) -> dict:
     try:
-        f = get("InsuranceFund")
+        f = get_contract(chain_key, "InsuranceFund")
         return {
             "balance_usdc": _u(f.functions.balance().call()),
             "total_covered_usdc": _u(f.functions.totalCovered().call()),
             "recipient": f.functions.coverageRecipient().call(),
         }
     except Exception as e:
-        log.warning(f"insurance_state failed: {e}")
+        log.warning(f"[{chain_key}] insurance_state failed: {e}")
         return {"balance_usdc": 0.0, "total_covered_usdc": 0.0, "recipient": ""}
 
 
-def treasury_state() -> dict:
+def treasury_state(chain_key: str) -> dict:
     try:
-        t = get("Treasury")
+        t = get_contract(chain_key, "Treasury")
         return {
             "insurance_bps": int(t.functions.insuranceBps().call()),
             "operations_bps": int(t.functions.operationsBps().call()),
@@ -415,13 +377,13 @@ def treasury_state() -> dict:
             "agent_rewards": t.functions.agentRewards().call(),
         }
     except Exception as e:
-        log.warning(f"treasury_state failed: {e}")
+        log.warning(f"[{chain_key}] treasury_state failed: {e}")
         return {}
 
 
-def agent_record(address: str) -> dict:
+def agent_record(chain_key: str, address: str) -> dict:
     try:
-        r = get("AgentRegistry").functions.agents(Web3.to_checksum_address(address)).call()
+        r = get_contract(chain_key, "AgentRegistry").functions.agents(Web3.to_checksum_address(address)).call()
         role, stake, reputation, registered_at, unbonding_at, active = r
         role_names = ["None", "DataCollector", "Underwriter", "PoolManager", "Recovery"]
         return {
@@ -435,7 +397,7 @@ def agent_record(address: str) -> dict:
             "active": bool(active),
         }
     except Exception as e:
-        log.warning(f"agent_record failed: {e}")
+        log.warning(f"[{chain_key}] agent_record failed: {e}")
         return {}
 
 
@@ -443,9 +405,40 @@ def agent_record(address: str) -> dict:
 # USDC
 # ----------------------------------------------------------------
 
-def usdc_balance(wallet: str) -> float:
+def usdc_balance(chain_key: str, wallet: str) -> float:
     try:
-        bal = get("USDC").functions.balanceOf(Web3.to_checksum_address(wallet)).call()
+        bal = get_contract(chain_key, "USDC").functions.balanceOf(Web3.to_checksum_address(wallet)).call()
         return _u(bal)
     except Exception:
         return 0.0
+
+
+# ================================================================
+# ASYNC WRAPPERS — use these from async routes to avoid blocking
+# ================================================================
+
+async def a_token_id_of(chain_key, wallet):              return await asyncio.to_thread(token_id_of, chain_key, wallet)
+async def a_identity_exists(chain_key, token_id):        return await asyncio.to_thread(identity_exists, chain_key, token_id)
+async def a_get_score(chain_key, token_id):              return await asyncio.to_thread(get_score, chain_key, token_id)
+async def a_get_pending_score(chain_key, token_id):      return await asyncio.to_thread(get_pending_score, chain_key, token_id)
+async def a_oracle_challenge_period(chain_key):          return await asyncio.to_thread(oracle_challenge_period, chain_key)
+async def a_graduation_state(chain_key, token_id):       return await asyncio.to_thread(graduation_state, chain_key, token_id)
+async def a_available_credit(chain_key, token_id):       return await asyncio.to_thread(available_credit, chain_key, token_id)
+async def a_tier_base_limits(chain_key):                 return await asyncio.to_thread(tier_base_limits, chain_key)
+async def a_borrow_apr(chain_key, tier, util_bps):       return await asyncio.to_thread(borrow_apr, chain_key, tier, util_bps)
+async def a_supply_apr(chain_key, util_bps, rf=0):       return await asyncio.to_thread(supply_apr, chain_key, util_bps, rf)
+async def a_rate_curves(chain_key):                      return await asyncio.to_thread(rate_curves, chain_key)
+async def a_pool_stats(chain_key):                       return await asyncio.to_thread(pool_stats, chain_key)
+async def a_cgusdc_balance(chain_key, wallet):           return await asyncio.to_thread(cgusdc_balance, chain_key, wallet)
+async def a_get_loan(chain_key, loan_id):                return await asyncio.to_thread(get_loan, chain_key, loan_id)
+async def a_borrower_loan_ids(chain_key, token_id):      return await asyncio.to_thread(borrower_loan_ids, chain_key, token_id)
+async def a_total_active_exposure(chain_key, token_id):  return await asyncio.to_thread(total_active_exposure, chain_key, token_id)
+async def a_grace_period(chain_key):                     return await asyncio.to_thread(grace_period, chain_key)
+async def a_attestations_for(chain_key, token_id):       return await asyncio.to_thread(attestations_for, chain_key, token_id)
+async def a_attestations_by(chain_key, token_id):        return await asyncio.to_thread(attestations_by, chain_key, token_id)
+async def a_get_attestation(chain_key, att_id):          return await asyncio.to_thread(get_attestation, chain_key, att_id)
+async def a_total_attestation_weight(chain_key, tid):    return await asyncio.to_thread(total_attestation_weight, chain_key, tid)
+async def a_insurance_state(chain_key):                  return await asyncio.to_thread(insurance_state, chain_key)
+async def a_treasury_state(chain_key):                   return await asyncio.to_thread(treasury_state, chain_key)
+async def a_agent_record(chain_key, address):            return await asyncio.to_thread(agent_record, chain_key, address)
+async def a_usdc_balance(chain_key, wallet):             return await asyncio.to_thread(usdc_balance, chain_key, wallet)

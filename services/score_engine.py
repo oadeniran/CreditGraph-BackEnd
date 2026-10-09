@@ -1,14 +1,9 @@
 """
-Computes a score in [300, 1000] and a tier in [1, 5] for a given token_id.
-Inputs are a mix of on-chain reads (graduation streak, attestation weight,
-wallet age, prior loans) and mocked off-chain signals (mobile money, KYC).
-
-This is a heuristic stand-in for the real AI scoring pipeline. The flow
-that wraps it (quorum signing + submit + finalize) is fully real.
+Score heuristic. Chain-aware: pulls graduation + attestation weight from the
+chain being scored, so each chain has its own score.
 """
 
 import hashlib
-import time
 from typing import Tuple
 
 from services import chain_reader
@@ -25,7 +20,6 @@ TIER_CUTOFFS = [
 
 
 def _seed_signal(wallet: str, salt: str) -> float:
-    """Deterministic 0..1 number derived from wallet+salt. Stand-in for real data."""
     h = hashlib.sha256(f"{wallet.lower()}:{salt}".encode()).hexdigest()
     return (int(h[:8], 16) % 10_000) / 10_000.0
 
@@ -37,35 +31,31 @@ def _tier_for(score: int) -> int:
     return 1
 
 
-def compute_score(wallet: str, token_id: int) -> Tuple[int, int, dict]:
+def compute_score(chain_key: str, wallet: str, token_id: int) -> Tuple[int, int, dict]:
     """
-    Returns (score, tier, components_dict).
-    Score is bounded [300, 1000].
+    Returns (score, tier, components_dict) on the specified chain.
     """
-    # --- Mocked off-chain signals (deterministic per wallet) ---
-    mobile_money = _seed_signal(wallet, "mobile_money")  # 0..1
-    kyc = 0.8  # everyone passes our test KYC
-    onchain_history = _seed_signal(wallet, "onchain_history")  # placeholder for wallet-age math
+    mobile_money = _seed_signal(wallet, "mobile_money")
+    kyc = 0.8
+    onchain_history = _seed_signal(wallet, "onchain_history")
 
-    # --- Real on-chain signals ---
-    grad = chain_reader.graduation_state(token_id) if token_id else {
+    grad = chain_reader.graduation_state(chain_key, token_id) if token_id else {
         "lifetime_on_time": 0, "lifetime_defaults": 0, "streak": 0
     }
-    attestation_weight_usdc = chain_reader.total_attestation_weight(token_id) if token_id else 0.0
+    attestation_weight_usdc = (
+        chain_reader.total_attestation_weight(chain_key, token_id) if token_id else 0.0
+    )
 
-    # Graduation signal: streak boosts, defaults penalize
     streak = grad.get("streak", 0)
     defaults = grad.get("lifetime_defaults", 0)
     graduation_signal = max(0.0, min(1.0, (streak * 0.1) - (defaults * 0.3) + 0.3))
-
-    # Attestation signal: normalized at $50 = 1.0
     attestation_signal = min(1.0, attestation_weight_usdc / 50.0)
 
     components = {
         "mobile_money": {
             "weight": 0.35,
             "value": round(mobile_money, 3),
-            "note": f"Simulated inflow regularity over 12 months",
+            "note": "Simulated inflow regularity over 12 months",
         },
         "onchain_history": {
             "weight": 0.20,
@@ -75,7 +65,7 @@ def compute_score(wallet: str, token_id: int) -> Tuple[int, int, dict]:
         "attestations": {
             "weight": 0.20,
             "value": round(attestation_signal, 3),
-            "note": f"${attestation_weight_usdc:.2f} of social vouching",
+            "note": f"${attestation_weight_usdc:.2f} of social vouching on this chain",
         },
         "identity_kyc": {
             "weight": 0.15,
@@ -90,7 +80,6 @@ def compute_score(wallet: str, token_id: int) -> Tuple[int, int, dict]:
     }
 
     weighted = sum(c["value"] * c["weight"] for c in components.values())
-    # Map 0..1 to 300..1000
     score = int(round(300 + weighted * 700))
     score = max(300, min(1000, score))
     tier = _tier_for(score)

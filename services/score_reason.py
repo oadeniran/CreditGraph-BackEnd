@@ -1,10 +1,9 @@
 """
-Builds the score reason payload and a stable hash to embed on-chain as reasonHash.
-We store the full payload in Mongo so the FE can render a "Why this score?" view.
+Score reason payload. Includes chain_key so the FE can show which chain
+this score belongs to.
 """
 
 import json
-import hashlib
 from datetime import datetime
 from typing import Optional
 
@@ -12,19 +11,10 @@ from web3 import Web3
 from core.database import db
 
 
-def build_reason(token_id: int, wallet: str, score: int, tier: int, components: dict) -> dict:
-    """
-    components example:
-      {
-        "mobile_money": {"weight": 0.35, "value": 0.78, "note": "12 months of regular inflows"},
-        "onchain_history": {"weight": 0.20, "value": 0.55, "note": "Wallet active for 4 months"},
-        "attestations": {"weight": 0.20, "value": 0.40, "note": "1 attester, Tier 2"},
-        "identity_kyc": {"weight": 0.15, "value": 0.80, "note": "Phone verified"},
-        "graduation": {"weight": 0.10, "value": 0.50, "note": "2 on-time repayments"},
-      }
-    """
+def build_reason(chain_key: str, token_id: int, wallet: str, score: int, tier: int, components: dict) -> dict:
     return {
-        "version": "0.1",
+        "version": "0.2",
+        "chain_key": chain_key,
         "token_id": token_id,
         "wallet": wallet,
         "score": score,
@@ -37,7 +27,6 @@ def build_reason(token_id: int, wallet: str, score: int, tier: int, components: 
 
 
 def hash_reason(reason: dict) -> bytes:
-    """bytes32 hash of the canonical JSON form."""
     canonical = json.dumps(reason, sort_keys=True, separators=(",", ":"))
     return Web3.keccak(text=canonical)
 
